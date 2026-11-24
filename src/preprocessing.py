@@ -216,6 +216,12 @@ def full_preprocess(df, target_col, task_type=None, impute_strategy="auto",
     """
     df = df.copy()
 
+    # Cloud memory protection: cap training rows to 10,000 if dataset is huge
+    sampled_message = None
+    if len(df) > 10000:
+        df = df.sample(n=10000, random_state=random_state).reset_index(drop=True)
+        sampled_message = "Dataset downsampled to 10,000 records for optimal cloud performance & RAM safety."
+
     # Determine task type
     task_type = detect_task_type(df, target_col, override=task_type)
 
@@ -333,5 +339,6 @@ def full_preprocess(df, target_col, task_type=None, impute_strategy="auto",
         "dropped_cols": dropped_cols,
         "original_categories": original_categories,
         "impute_strategy": impute_strategy,
-        "scaler_type": scaler_type
+        "scaler_type": scaler_type,
+        "sampled_message": sampled_message
     }

@@ -292,3 +292,85 @@ def get_best_model(results, task_type, primary_metric=None):
                 break
 
     return best_name, results.get(best_name)
+
+
+def tune_model_hyperparameters(model_name, X_train, y_train, task_type, n_trials=8):
+    """
+    Lightweight hyperparameter tuning powered by Optuna.
+    Safe for cloud environments with limited vCPU and memory.
+    """
+    import optuna
+    from sklearn.model_selection import cross_val_score
+    optuna.logging.set_verbosity(optuna.logging.WARNING)
+
+    is_clf = (task_type == "classification")
+    scoring = "f1_weighted" if is_clf else "r2"
+
+    def objective(trial):
+        if "Random Forest" in model_name:
+            n_est = trial.suggest_int("n_estimators", 30, 100, step=10)
+            depth = trial.suggest_int("max_depth", 4, 14)
+            min_split = trial.suggest_int("min_samples_split", 2, 8)
+            model = RandomForestClassifier(n_estimators=n_est, max_depth=depth, min_samples_split=min_split, random_state=42, n_jobs=-1) if is_clf else RandomForestRegressor(n_estimators=n_est, max_depth=depth, min_samples_split=min_split, random_state=42, n_jobs=-1)
+        elif "Gradient Boosting" in model_name:
+            n_est = trial.suggest_int("n_estimators", 30, 80, step=10)
+            lr = trial.suggest_float("learning_rate", 0.03, 0.25, log=True)
+            depth = trial.suggest_int("max_depth", 3, 6)
+            model = GradientBoostingClassifier(n_estimators=n_est, learning_rate=lr, max_depth=depth, random_state=42) if is_clf else GradientBoostingRegressor(n_estimators=n_est, learning_rate=lr, max_depth=depth, random_state=42)
+        elif "XGBoost" in model_name and XGBOOST_AVAILABLE:
+            n_est = trial.suggest_int("n_estimators", 30, 80, step=10)
+            lr = trial.suggest_float("learning_rate", 0.03, 0.25, log=True)
+            depth = trial.suggest_int("max_depth", 3, 6)
+            model = XGBClassifier(n_estimators=n_est, learning_rate=lr, max_depth=depth, random_state=42, eval_metric="logloss", verbosity=0) if is_clf else XGBRegressor(n_estimators=n_est, learning_rate=lr, max_depth=depth, random_state=42, verbosity=0)
+        elif "LightGBM" in model_name and LGBM_AVAILABLE:
+            n_est = trial.suggest_int("n_estimators", 30, 80, step=10)
+            lr = trial.suggest_float("learning_rate", 0.03, 0.25, log=True)
+            depth = trial.suggest_int("max_depth", 3, 6)
+            model = LGBMClassifier(n_estimators=n_est, learning_rate=lr, max_depth=depth, random_state=42, verbose=-1) if is_clf else LGBMRegressor(n_estimators=n_est, learning_rate=lr, max_depth=depth, random_state=42, verbose=-1)
+        elif "Decision Tree" in model_name:
+            depth = trial.suggest_int("max_depth", 3, 10)
+            min_split = trial.suggest_int("min_samples_split", 2, 8)
+            model = DecisionTreeClassifier(max_depth=depth, min_samples_split=min_split, random_state=42) if is_clf else DecisionTreeRegressor(max_depth=depth, min_samples_split=min_split, random_state=42)
+        elif "Logistic Regression" in model_name:
+            c_val = trial.suggest_float("C", 0.05, 5.0, log=True)
+            model = LogisticRegression(C=c_val, max_iter=1000, random_state=42)
+        elif "Ridge" in model_name:
+            alpha = trial.suggest_float("alpha", 0.05, 10.0, log=True)
+            model = Ridge(alpha=alpha, random_state=42)
+        elif "K-Nearest" in model_name:
+            k = trial.suggest_int("n_neighbors", 3, 9, step=2)
+            model = KNeighborsClassifier(n_neighbors=k) if is_clf else KNeighborsRegressor(n_neighbors=k)
+        else:
+            c_val = trial.suggest_float("C", 0.1, 5.0, log=True)
+            model = SVC(C=c_val, probability=True, random_state=42) if is_clf else SVR(C=c_val)
+
+        cv_folds = 3 if len(y_train) >= 30 else 2
+        scores = cross_val_score(model, X_train, y_train, cv=cv_folds, scoring=scoring)
+        return float(np.mean(scores))
+
+    study = optuna.create_study(direction="maximize")
+    study.optimize(objective, n_trials=n_trials)
+
+    # Instantiate best model
+    best_params = study.best_params
+    if "Random Forest" in model_name:
+        tuned_model = RandomForestClassifier(**best_params, random_state=42, n_jobs=-1) if is_clf else RandomForestRegressor(**best_params, random_state=42, n_jobs=-1)
+    elif "Gradient Boosting" in model_name:
+        tuned_model = GradientBoostingClassifier(**best_params, random_state=42) if is_clf else GradientBoostingRegressor(**best_params, random_state=42)
+    elif "XGBoost" in model_name and XGBOOST_AVAILABLE:
+        tuned_model = XGBClassifier(**best_params, random_state=42, eval_metric="logloss", verbosity=0) if is_clf else XGBRegressor(**best_params, random_state=42, verbosity=0)
+    elif "LightGBM" in model_name and LGBM_AVAILABLE:
+        tuned_model = LGBMClassifier(**best_params, random_state=42, verbose=-1) if is_clf else LGBMRegressor(**best_params, random_state=42, verbose=-1)
+    elif "Decision Tree" in model_name:
+        tuned_model = DecisionTreeClassifier(**best_params, random_state=42) if is_clf else DecisionTreeRegressor(**best_params, random_state=42)
+    elif "Logistic Regression" in model_name:
+        tuned_model = LogisticRegression(C=best_params.get("C", 1.0), max_iter=1000, random_state=42)
+    elif "Ridge" in model_name:
+        tuned_model = Ridge(alpha=best_params.get("alpha", 1.0), random_state=42)
+    elif "K-Nearest" in model_name:
+        tuned_model = KNeighborsClassifier(n_neighbors=best_params.get("n_neighbors", 5)) if is_clf else KNeighborsRegressor(n_neighbors=best_params.get("n_neighbors", 5))
+    else:
+        tuned_model = SVC(C=best_params.get("C", 1.0), probability=True, random_state=42) if is_clf else SVR(C=best_params.get("C", 1.0))
+
+    tuned_model.fit(X_train, y_train)
+    return tuned_model, best_params, float(study.best_value)

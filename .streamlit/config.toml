@@ -6,8 +6,11 @@ secondaryBackgroundColor = "#f8fafc"
 textColor = "#0f172a"
 font = "sans serif"
 
+[browser]
+gatherUsageStats = false
+
+[client]
+showErrorDetails = true
+
 [server]
-headless = true
-enableCORS = false
-enableXsrfProtection = false
 maxUploadSize = 200

@@ -28,7 +28,8 @@ from src.model_trainer import (
     get_best_model,
     get_feature_importance,
     get_classification_models,
-    get_regression_models
+    get_regression_models,
+    tune_model_hyperparameters
 )
 from src.visualizations import (
     plot_distributions,
@@ -212,9 +213,12 @@ if "best_name" not in st.session_state:
 if "pipeline_obj" not in st.session_state:
     st.session_state["pipeline_obj"] = None
 
-# Auto-generate sample files on disk if not present
-if not os.path.exists("sample_data/customer_churn_classification.csv"):
-    save_sample_datasets()
+# Auto-generate sample files on disk if not present (safely ignored in read-only containers)
+try:
+    if not os.path.exists("sample_data/customer_churn_classification.csv"):
+        save_sample_datasets()
+except Exception:
+    pass
 
 # ── Sidebar Navigation & Controls ──────────────────────────────────────────────
 with st.sidebar:
@@ -486,6 +490,13 @@ elif nav_selection == "2. Dataset Explorer":
                 st.session_state["prep"] = None
                 st.rerun()
 
+            # Direct in-memory sample download buttons for cloud users
+            st.markdown("<div style='margin-top: 10px;'></div>", unsafe_allow_html=True)
+            churn_csv = generate_classification_demo(n=250).to_csv(index=False).encode("utf-8")
+            st.download_button("⬇ Download Sample Churn CSV", churn_csv, "sample_churn.csv", "text/csv", use_container_width=True)
+            estate_csv = generate_regression_demo(n=250).to_csv(index=False).encode("utf-8")
+            st.download_button("⬇ Download Sample Real Estate CSV", estate_csv, "sample_real_estate.csv", "text/csv", use_container_width=True)
+
     if df is None:
         st.info("👈 Please upload a dataset or select a sample dataset to view the explorer.")
         st.stop()
@@ -739,6 +750,8 @@ elif nav_selection == "4. AutoML Training":
                 test_size=test_size
             )
             st.session_state["prep"] = prep
+            if prep.get("sampled_message"):
+                st.info(f"⚡ {prep['sampled_message']}")
             st.write(f"✓ Engineered {prep['X_train'].shape[1]} input features from {len(selected_features)} raw columns.")
 
             st.write(f"⚡ Step 2/3: Training {len(selected_models)} models...")
@@ -878,6 +891,27 @@ elif nav_selection == "5. Model Comparison":
         fig_imp = plot_feature_importance(importances, top_n=12)
         if fig_imp:
             st.plotly_chart(fig_imp, use_container_width=True)
+
+    # Hyperparameter Tuning with Optuna
+    st.markdown("<br>", unsafe_allow_html=True)
+    with st.expander("✨ Hyperparameter Optimization (Optuna Engine)", expanded=False):
+        st.markdown(f"Fine-tune hyperparameters for champion model **{best_name}** using Bayesian optimization.")
+        h_col1, h_col2 = st.columns([1, 2])
+        with h_col1:
+            trials_count = st.slider("Optimization Trials", min_value=5, max_value=20, value=8, step=1)
+            tune_btn = st.button("🚀 Run Optuna Optimization", type="primary")
+
+        if tune_btn:
+            with st.spinner(f"Running Optuna Bayesian optimization ({trials_count} trials)..."):
+                tuned_m, best_params, best_score = tune_model_hyperparameters(
+                    best_name, prep["X_train"], prep["y_train"], task_type, n_trials=trials_count
+                )
+                st.session_state["pipeline_obj"].model = tuned_m
+                st.session_state["results"][best_name]["model"] = tuned_m
+                st.success(f"Optimization complete! Cross-validation score: **{best_score:.4f}**")
+                with h_col2:
+                    st.markdown("**Optimal Parameters:**")
+                    st.json(best_params)
 
 
 # ═════════════════════════════════════════════════════════════════════════════

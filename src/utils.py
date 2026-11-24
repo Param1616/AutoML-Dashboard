@@ -18,21 +18,27 @@ def load_dataset(uploaded_file):
     try:
         if ext == ".csv":
             try:
-                return pd.read_csv(uploaded_file, encoding="utf-8")
-            except UnicodeDecodeError:
+                df = pd.read_csv(uploaded_file, encoding="utf-8")
+            except (UnicodeDecodeError, UnicodeError):
                 if hasattr(uploaded_file, "seek"):
                     uploaded_file.seek(0)
-                return pd.read_csv(uploaded_file, encoding="ISO-8859-1")
+                df = pd.read_csv(uploaded_file, encoding="ISO-8859-1")
         elif ext in [".xlsx", ".xls"]:
-            return pd.read_excel(uploaded_file)
+            df = pd.read_excel(uploaded_file)
         else:
             # Attempt CSV first, then Excel
             try:
-                return pd.read_csv(uploaded_file)
+                df = pd.read_csv(uploaded_file)
             except Exception:
                 if hasattr(uploaded_file, "seek"):
                     uploaded_file.seek(0)
-                return pd.read_excel(uploaded_file)
+                df = pd.read_excel(uploaded_file)
+
+        if df is None or df.empty:
+            raise ValueError("The uploaded file contains no data or could not be parsed.")
+        if len(df.columns) < 2:
+            raise ValueError("The dataset must have at least 2 columns (features and a target).")
+        return df
     except Exception as e:
         raise ValueError(f"Failed to read file '{filename}': {str(e)}")
 
